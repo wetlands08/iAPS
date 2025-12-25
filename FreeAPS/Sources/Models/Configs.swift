@@ -2,7 +2,9 @@ import Foundation
 import SwiftUI
 
 struct DateFilter {
+    var oneHour = Date().addingTimeInterval(-1.hours.timeInterval) as NSDate
     var twoHours = Date().addingTimeInterval(-2.hours.timeInterval) as NSDate
+    var threeHours = Date().addingTimeInterval(-3.hours.timeInterval) as NSDate
     var today = Calendar.current.startOfDay(for: Date()) as NSDate
     var day = Date().addingTimeInterval(-24.hours.timeInterval) as NSDate
     var twoDays = Date().addingTimeInterval(-2.days.timeInterval) as NSDate
@@ -15,7 +17,7 @@ struct DateFilter {
 
 public enum IAPSconfig {
     static let padding: CGFloat = 60
-    static let iconSize: CGFloat = 20
+    static let iconSize: CGFloat = 34
     static let backgroundOpacity: Double = 0.1
     static let buttonSize: CGFloat = 26
     static let shadowOpacity: CGFloat = 0.75
@@ -27,6 +29,16 @@ public enum IAPSconfig {
     static let newVersion = "iAPS.newVersion"
     static let inBolusView = "iAPS.inBolusView"
     static let statURL = URL(string: "https://submit.open-iaps.app")!
+    /// Colors
+    static let headerBackgroundLight = Color.gray.opacity(IAPSconfig.backgroundOpacity)
+    static let headerBackgroundDark = Color(.systemGray5) // Color.header2.opacity(1)
+    static let chartBackgroundLight = Color.white
+    static let chartBackgroundDark = Color.black
+    static let previewBackgroundLight = Color.white
+    static let previewBackgroundDark = Color.black
+    static let homeViewBackgroundLight = Color(.systemGray5) // Color.gray.opacity(IAPSconfig.backgroundOpacity * 2)
+    static let homeViewBackgrundDark = Color(.systemGray5) // Color.header2.opacity(0.95)
+    static let activityBackground = Color(.systemGray5)
 }
 
 extension Font {
@@ -40,6 +52,7 @@ extension Font {
     static let previewSmall = Font.custom("PreviewSmallFont", size: 14)
     static let previewNormal = Font.custom("PreviewNormalFont", size: 16)
     static let previewHeadline = Font.custom("PreviewHeadlineFont", size: 18)
+    static let previewExtraBig = Font.custom("PreviewHeadlineFont", size: 20)
     static let extraSmall = Font.custom("ExtraSmallFont", size: 12)
 
     static let suggestionHeadline = Font.custom("SuggestionHeadlineFont", fixedSize: 20)
@@ -48,6 +61,7 @@ extension Font {
     static let suggestionSmallParts = Font.custom("SuggestionSmallPartsFont", fixedSize: 16)
 
     static let glucoseFont = Font.custom("SuggestionSmallPartsFont", size: 45)
+    static let glucoseFontMdDl = Font.custom("SuggestionSmallPartsFont", size: 40)
     static let glucoseSmallFont = Font.custom("SuggestionSmallPartsFont", size: 24)
 
     static let bolusProgressStopFont = Font.custom("BolusProgressStop", fixedSize: 24)

@@ -12,7 +12,7 @@ public enum Sex: String, CaseIterable, Identifiable {
 extension Sharing {
     struct RootView: BaseView {
         let resolver: Resolver
-        @StateObject var state = StateModel()
+        @StateObject var state: StateModel
 
         @State private var display: Bool = false
         @State private var copied: Bool = false
@@ -29,6 +29,11 @@ extension Sharing {
                 calendar.date(from: endComponents)!
         }()
 
+        init(resolver: Resolver) {
+            self.resolver = resolver
+            _state = StateObject(wrappedValue: StateModel(resolver: resolver))
+        }
+
         var body: some View {
             Form {
                 Section {
@@ -38,7 +43,7 @@ extension Sharing {
                             ForEach(Sex.allCases) { sex in
                                 Text(NSLocalizedString(sex.rawValue, comment: "")).tag(Optional(sex.rawValue))
                             }
-                        }.onChange(of: state.sex) { _ in
+                        }.onChange(of: state.sex) {
                             state.saveSetting()
                         }
                         HStack {
@@ -51,12 +56,6 @@ extension Sharing {
                     Text(
                         "\nIf you enable \"Share and Backup\" daily backups of your settings and statistics will be made to online database.\n\nMake sure to copy and save your recovery token below. The recovery token is required to import your settings to another phone when using the onboarding view."
                     )
-                }
-
-                if !state.uploadStats {
-                    Section {
-                        Toggle("Just iAPS version number", isOn: $state.uploadVersion)
-                    } header: { Text("Share Bare Minimum") }
                 }
 
                 Section {}
@@ -102,7 +101,6 @@ extension Sharing {
             }
             .dynamicTypeSize(...DynamicTypeSize.xxLarge)
             .onAppear {
-                configureView()
                 state.savedSettings()
             }
             .navigationBarTitle("Share and Backup")

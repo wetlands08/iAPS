@@ -1,8 +1,8 @@
 //для enact/smb-suggested.json параметры: monitor/iob.json monitor/temp_basal.json monitor/glucose.json settings/profile.json settings/autosens.json --meal monitor/meal.json --microbolus --reservoir monitor/reservoir.json
 
-function generate(iob, currenttemp, glucose, profile, autosens = null, meal = null, microbolusAllowed = true, reservoir = null, clock, dynamicVariables) {
+function generate(iob, currenttemp, glucose, profile, autosens = null, meal = null, microbolusAllowed = true, reservoir = null, clock, pumpHistory) {
     // Needs to be updated here due to time format).
-    clock = new Date()
+    clock = new Date();
     
     var autosens_data = null;
     if (autosens) {
@@ -19,21 +19,33 @@ function generate(iob, currenttemp, glucose, profile, autosens = null, meal = nu
         meal_data = meal;
     }
     
+    const dynamicVariables = profile.dynamicVariables || { } ;
+    
     // Overrides
-    if (dynamicVariables && dynamicVariables.useOverride) {
+    if (dynamicVariables.useOverride) {
         const factor = dynamicVariables.overridePercentage / 100;
         if (factor != 1) {
-            // Basal
-            profile.current_basal *= factor;
+            // Basal has already been adjusted in prepare/profile.js
+            console.log("Override active (" + factor + "), basal: (" + profile.current_basal + ")")
             // ISF and CR
             if (dynamicVariables.isfAndCr) {
-                profile.sense /= factor;
-                profile.carb_ratio /= factor;
+                profile.sens /= factor;
+                profile.carb_ratio =  round(profile.carb_ratio / factor, 1);
+                console.log("Override Active, " + dynamicVariables.overridePercentage + "%");
             } else {
-                if (dynamicVariables.cr) { profile.carb_ratio /= factor; }
-                if (dynamicVariables.isf) { profile.sens /= factor; }
+                if (dynamicVariables.cr) {
+                    profile.carb_ratio =  round(profile.carb_ratio / factor, 1);
+                    console.log("Override Active, CR: " + profile.old_cr + " → " + profile.carb_ratio);
+                }
+                if (dynamicVariables.isf) {
+                    profile.sens /= factor;
+                    if (profile.out_units == 'mmol/L') {
+                        console.log("Override Active, ISF: " + profile.old_isf + " → " + Math.round(profile.sens * 0.0555 * 10) / 10);
+                    } else {
+                        console.log("Override Active, ISF: " + profile.old_isf + " → " + profile.sens);
+                    }
+                }
             }
-            console.log("Override Active, " + dynamicVariables.overridePercentage + "%");
         }
             // SMB Minutes
         if (dynamicVariables.advancedSettings && dynamicVariables.smbMinutes !== profile.maxSMBBasalMinutes) {
@@ -53,7 +65,7 @@ function generate(iob, currenttemp, glucose, profile, autosens = null, meal = nu
         }
         
             //SMBs
-        if (disableSMBs(dynamicVariables)) {
+        if (disableSMBs(dynamicVariables, clock)) {
             microbolusAllowed = false;
             console.error("SMBs disabled by Override");
         }
@@ -76,22 +88,25 @@ function generate(iob, currenttemp, glucose, profile, autosens = null, meal = nu
         dynisf(profile, autosens_data, dynamicVariables, glucose);
     }
     
-    // If ignoring flat CGM errors, circumvent also the Oref0 error
-    if (dynamicVariables.disableCGMError) {
-        if (glucose.length > 1 && Math.abs(glucose[0].glucose - glucose[1].glucose) < 5) {
-            if (glucose[1].glucose >= glucose[1].glucose) {
-                glucose[1].glucose -= 5;
-            } else {glucose[1].glucose += 5; }
-            console.log("Flat CGM by-passed.");
+    var glucose_status = freeaps_glucoseGetLast(glucose)
+    
+    // Auto ISF
+    if (profile.iaps.autoisf) {
+        autosens_data.ratio = profile.aisf;
+        console.log("Auto ISF ratio: " + autosens_data.ratio);
+        if (microbolusAllowed && !profile.microbolusAllowed) {
+            microbolusAllowed = false;
+            console.log("SMBs disabled by Auto ISF layer");
         }
     }
-    var glucose_status = freeaps_glucoseGetLast(glucose);
-    
-    // In case Basal Rate been set in midleware
+
+    // In case Basal Rate been set in midleware or B30
     if (profile.set_basal && profile.basal_rate) {
-        console.log("Basal Rate set by middleware to " + profile.basal_rate + " U/h.");
+        console.log("Basal Rate set by middleware or B30 to " + profile.basal_rate + " U/h.");
     }
     
+    /* For testing replace with:
+    return test(glucose_status, currenttemp, iob, profile, autosens_data, meal_data, freeaps_basalSetTemp, microbolusAllowed, reservoir_data, clock); */
     return freeaps_determineBasal(glucose_status, currenttemp, iob, profile, autosens_data, meal_data, freeaps_basalSetTemp, microbolusAllowed, reservoir_data, clock);
 }
 
@@ -99,21 +114,21 @@ function generate(iob, currenttemp, glucose, profile, autosens = null, meal = nu
 function dynisf(profile, autosens_data, dynamicVariables, glucose) {
     console.log("Starting dynamic ISF layer.");
     var dynISFenabled = true;
-    // One of two exercise settings (they share the same purpose).
-    var exerciseSetting = false;
-    if (profile.highTemptargetRaisesSensitivity || profile.exerciseMode || dynamicVariables.isEnabled) {
-        exerciseSetting = true;
+    
+    //Turn off when Auto ISF is used
+    if (profile.iaps.autoisf) {
+        console.log("Dynamic ISF disabled due to Auto ISF.");
+        return;
     }
-        
-    const target = profile.min_bg;
-        
+    
     // Turn dynISF off when using a temp target >= 118 (6.5 mol/l) and if an exercise setting is enabled.
-    if (target >= 118 && exerciseSetting) {
-        //dynISFenabled = false;
+    if (exercising(profile, dynamicVariables)) {
         console.log("Dynamic ISF disabled due to a high temp target/exercise.");
         return;
     }
-
+    
+    const target = profile.min_bg;
+    
     // In case the autosens.min/max limits are reversed:
     const autosens_min = Math.min(profile.autosens_min, profile.autosens_max);
     const autosens_max = Math.max(profile.autosens_min, profile.autosens_max);
@@ -225,12 +240,6 @@ function dynisf(profile, autosens_data, dynamicVariables, glucose) {
     if (enable_sigmoid) {
         console.log("Dynamic ISF enabled. Dynamic Ratio (Sigmoid function): " + newRatio + ". New ISF = " + isf + " mg/dl / " + round(0.0555 * isf, 1) + " mmol/l.");
     }
-
-    // Basal Adjustment
-    if (profile.tddAdjBasal && dynISFenabled) {
-        profile.current_basal *= tdd_factor;
-        console.log("Dynamic ISF. Basal adjusted with TDD factor: " + round(tdd_factor, 2));
-    }
 }
 
 function round(value, digits) {
@@ -238,21 +247,31 @@ function round(value, digits) {
     var scale = Math.pow(10, digits);
     return Math.round(value * scale) / scale;
 }
+ 
+function exercising(profile, dynamicVariables) {
+    // One of two exercise settings (they share the same purpose).
+    if (profile.high_temptarget_raises_sensitivity || profile.exercise_mode || dynamicVariables.isEnabled) {
+        // Turn dynISF off when using a temp target >= 118 (6.5 mol/l) and if an exercise setting is enabled.
+        if (profile.min_bg >= 118) {
+            return true
+        }
+    }
+    return false
+}
 
-function disableSMBs(dynamicVariables) {
+function disableSMBs(dynamicVariables, now) {
     if (dynamicVariables.smbIsOff) {
-        if (!dynamicVariables.smbIsAlwaysOff) {
-            return true;
-        }
-        const hour = new Date().getHours();
-        if (dynamicVariables.end < dynamicVariables.start && hour < 24 && hour > dynamicVariables.start) {
-            dynamicVariables.end += 24;
-        }
-        if (hour >= dynamicVariables.start && hour <= dynamicVariables.end) {
-            return true;
-        }
-        if (dynamicVariables.end < dynamicVariables.start && hour < dynamicVariables.end) {
-            return true;
+        // smbIsAlwaysOff=true means "SMB are scheduled, NOT always off"
+        if (!dynamicVariables.smbIsAlwaysOff) { return true; }
+
+        var start = dynamicVariables.start;
+        var end = dynamicVariables.end;
+        var hour = now.getHours();
+
+        if (start <= end) {
+            return hour >= start && hour <= end;
+        } else {
+            return hour >= start || hour <= end;
         }
     }
     return false
